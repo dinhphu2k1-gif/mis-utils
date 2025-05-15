@@ -8,6 +8,8 @@ import oracledb
 import os
 from datetime import datetime
 import tempfile
+import asyncio
+import threading
 
 app = FastAPI()
 
@@ -21,9 +23,9 @@ app.add_middleware(
 )
 
 # Oracle DB connection parameters
-DB_USER = "your_username"  # Replace with your Oracle username
-DB_PASSWORD = "your_password"  # Replace with your Oracle password
-DB_DSN = "localhost:1521/your_service_name"  # Replace with your Oracle DSN
+DB_USER = "MIS_DL"  # Replace with your Oracle username
+DB_PASSWORD = "0MISDxe34fI7h8=#Y1"  # Replace with your Oracle password
+DB_DSN = "10.0.175.156:1531/DLDBDEV"  # Replace with your Oracle DSN
 
 # Initialize Oracle connection pool
 pool = oracledb.create_pool(
@@ -47,11 +49,11 @@ class LeaveRequest(BaseModel):
     reason: str
     location: str
 
-# Function to save data to Oracle DB
-async def save_to_oracle(data: dict):
-    async with pool.acquire() as connection:
-        async with connection.cursor() as cursor:
-            await cursor.execute("""
+# Function to save data to Oracle DB (synchronous)
+def save_to_oracle_sync(data: dict):
+    with pool.acquire() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
                 INSERT INTO LEAVE_REQUESTS (
                     name, position, department, used_days, requested_days,
                     start_date, end_date, reason, location, request_date
@@ -69,7 +71,12 @@ async def save_to_oracle(data: dict):
                 "location": data["location"],
                 "request_date": data["current_date"]
             })
-            await connection.commit()
+            connection.commit()
+
+# Async wrapper for synchronous DB operation
+async def save_to_oracle(data: dict):
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, save_to_oracle_sync, data)
 
 # Function to fill Word template
 def fill_word_template(template_path: str, data: dict) -> str:
@@ -110,13 +117,14 @@ async def fill_leave_request(request: LeaveRequest):
         "current_date": current_date,
         "remaining_days": 12 - request.used_days - request.requested_days
     }
-
-        # Save to Oracle DB
+    
+    # Save to Oracle DB
     try:
         await save_to_oracle(data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
+    # Generate Word file
     output_path = fill_word_template(template_path, data)
     
     return FileResponse(
